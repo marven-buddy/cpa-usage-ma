@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 (prepared)
+## 0.4.1
 
 - Publish the fork as the independent cpa-usage-ma plugin: new plugin ID, routes, binary/archive names, default database path and browser storage namespace. No automatic migration of the original plugin.
 - Support CLIProxyAPI v8 Base64 configuration and schema 6 management JSON. Create missing database directories and retain the active database after a failed reconfiguration.

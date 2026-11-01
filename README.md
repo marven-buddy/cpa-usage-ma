@@ -7,15 +7,15 @@
 - **零额外进程**：原生动态库（`.dylib` / `.so`）运行在 CPA 进程内，无需 Python、Node.js、Docker 或独立服务。
 - 真实 shadcn/ui 界面：Token 趋势、模型 / 匿名 Key / 请求明细与筛选。
 
-**准备版本：v0.4.1 / CLIProxyAPI v8。MIT 开源。**
+**版本：v0.4.1 / CLIProxyAPI v8。MIT 开源。**
 
 基于 [andyWang1688/cpa-usage](https://github.com/andyWang1688/cpa-usage) 二次开发，作为独立插件发布，插件 ID 为 `cpa-usage-ma`，默认数据库为 `~/.cli-proxy-api/cpa-usage-ma/usage.sqlite`，页面和浏览器配置使用独立命名空间。不会自动读取或迁移原插件数据；如需保留历史，请停止相关宿主后将旧 SQLite 完整备份复制到新目录，再配置新插件。已在 CPA v8.0.48 / Windows amd64 验证加载；Linux amd64 产物已交叉构建，仍需在目标服务器完成加载验收。
 
 ## 安装
 
-### 插件商店（发布后可用）
+### 插件商店
 
-本分支仅完成发布准备。须先合并到 `main` 并发布带安装包和 `checksums.txt` 的 v0.4.1 Release，以下插件源才能安装本版本。新插件可以与原版 `usage-report` 并存；两者应配置不同数据库，避免同时写入同一文件。也可在管理面板设置中添加下方第三方源，无需重复修改源配置。
+以下插件源从本仓库的正式 GitHub Release 安装对应平台包，并验证 `checksums.txt`。新插件可以与原版 `usage-report` 并存；两者应配置不同数据库，避免同时写入同一文件。也可在管理面板设置中添加下方第三方源，无需重复修改源配置。
 
 1. 在 `cliproxyapi.conf` 中添加插件商店源与插件配置：
 
@@ -134,7 +134,7 @@ cp dist/assets/* ../plugin/web/assets/
 
 ### 发布新版本
 
-发布前检查、版本同步、安装包校验与正式发布命令见 [RELEASING_CN.md](RELEASING_CN.md)。推送 `v{VERSION}` 标签会触发五个平台构建和 Release 发布；当前尚未打标签。
+发布前检查、版本同步、安装包校验与正式发布命令见 [RELEASING_CN.md](RELEASING_CN.md)。推送 `v{VERSION}` 标签会触发五个平台构建和 Release 发布。
 
 ## License
 

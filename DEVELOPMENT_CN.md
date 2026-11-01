@@ -2,7 +2,7 @@
 
 Fork：<https://github.com/marven-buddy/cpa-usage-ma>。开发分支：`dev/v8-local`。
 
-发布准备版本为 0.4.1，独立插件 ID 为 `cpa-usage-ma`。生产默认数据库、页面/API 和浏览器存储均与原版隔离；本机开发脚本继续显式指定 `.dev/data/usage.sqlite` 以保留已有模拟数据，不代表生产安装会自动迁移原插件。发布步骤见 [RELEASING_CN.md](RELEASING_CN.md)。
+发布版本为 0.4.1，独立插件 ID 为 `cpa-usage-ma`。生产默认数据库、页面/API 和浏览器存储均与原版隔离；本机开发脚本继续显式指定 `.dev/data/usage.sqlite` 以保留已有模拟数据，不代表生产安装会自动迁移原插件。发布步骤见 [RELEASING_CN.md](RELEASING_CN.md)。
 
 本机为 Windows amd64，部署目标为 CLIProxyAPI v8 / Linux amd64。Windows 本地环境运行真实 CPA v8 宿主与插件 DLL；Linux 产物独立构建，不能在 Windows 上完成 .so 加载验证。
 

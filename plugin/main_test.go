@@ -27,9 +27,19 @@ func TestRegister(t *testing.T) {
 	}
 	var registration struct {
 		SchemaVersion int `json:"schema_version"`
+		Metadata      struct {
+			Name             string
+			GitHubRepository string
+		}
 	}
 	if err := json.Unmarshal(e.Result, &registration); err != nil || registration.SchemaVersion != 6 {
 		t.Fatal("management JSON must preserve raw note strings using schema 6")
+	}
+	if registration.Metadata.Name != "cpa-usage-ma" || registration.Metadata.GitHubRepository != "https://github.com/marven-buddy/cpa-usage-ma" {
+		t.Fatalf("independent plugin metadata: %+v", registration.Metadata)
+	}
+	if filepath.Base(filepath.Dir(defaultDBPath())) != "cpa-usage-ma" || filepath.Base(defaultDBPath()) != "usage.sqlite" {
+		t.Fatalf("default database must be isolated from the original plugin: %s", defaultDBPath())
 	}
 }
 
@@ -72,13 +82,13 @@ func callMgmt(t *testing.T, path, method string) (int, string, []byte) {
 }
 
 func TestManagementReport(t *testing.T) {
-	status, ct, body := callMgmt(t, "/v0/resource/plugins/usage-report/report", "GET")
+	status, ct, body := callMgmt(t, "/v0/resource/plugins/cpa-usage-ma/report", "GET")
 	if status != 200 || len(body) < 300 {
 		t.Fatalf("page: %d %s %d bytes", status, ct, len(body))
 	}
 	t.Logf("page ok: %d bytes, %s", len(body), ct)
 
-	status, ct, js := callMgmt(t, "/v0/resource/plugins/usage-report/assets/index-BQjrGGWY.js", "GET")
+	status, ct, js := callMgmt(t, "/v0/resource/plugins/cpa-usage-ma/assets/index-Cp--UGfL.js", "GET")
 	if status != 200 || len(js) < 100000 {
 		t.Fatalf("js: %d %s %d bytes", status, ct, len(js))
 	}
@@ -91,7 +101,7 @@ func TestManagementAPI(t *testing.T) {
 	if _, err := handleMethod("usage.handle", seed); err != nil {
 		t.Fatal(err)
 	}
-	status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/usage", "GET")
+	status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/usage", "GET")
 	if status != 200 {
 		t.Fatalf("usage api: %d %s", status, body)
 	}
@@ -215,7 +225,7 @@ func TestManagementRegisterRoutes(t *testing.T) {
 		if r.Method != "GET" && r.Method != "POST" {
 			t.Fatalf("route %s missing explicit method", r.Path)
 		}
-		if !strings.HasPrefix(r.Path, "/plugins/usage-report/api/") {
+		if !strings.HasPrefix(r.Path, "/plugins/cpa-usage-ma/api/") {
 			t.Fatalf("route outside plugin namespace: %s", r.Path)
 		}
 	}

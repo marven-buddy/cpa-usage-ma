@@ -12,7 +12,7 @@ plugin/*.so
 plugin/*.h
 dist/
 .DS_Store
-plugin/usage-report
-plugin/usage-report.test
+plugin/cpa-usage-ma
+plugin/cpa-usage-ma.test
 plugin/*.dll
 .dev/

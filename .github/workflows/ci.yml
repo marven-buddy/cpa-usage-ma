@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, dev/v8-local]
   pull_request:
 permissions:
   contents: read
@@ -26,6 +26,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci && npm test && npm run build
         working-directory: frontend
+      - run: node scripts/verify-release.mjs
 
   build-matrix:
     strategy:
@@ -66,4 +67,4 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CC: ${{ matrix.cc }}
-        run: go build -buildmode=c-shared -o /tmp/usage-report-test.out .
+        run: go build -buildmode=c-shared -o /tmp/cpa-usage-ma-test.out .

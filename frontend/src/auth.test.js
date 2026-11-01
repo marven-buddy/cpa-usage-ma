@@ -5,7 +5,7 @@ import { AuthError, SESSION_KEY, createManagementClient, decodeCPAStorage } from
 const host = "cpa.test:8317";
 const userAgent = "Synthetic review browser";
 const env = { host, userAgent };
-const ok = () => new Response(JSON.stringify({ service: "cpa-usage" }), { status: 200 });
+const ok = () => new Response(JSON.stringify({ service: "cpa-usage-ma" }), { status: 200 });
 function storage(entries = []) {
   const data = new Map(entries);
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: (key) => data.delete(key) };
@@ -29,6 +29,8 @@ test("panel v1 and v2 credentials decode with their distinct host/UA rules", asy
       fetch: async (url, options) => { sent = { url, options }; return ok(); },
     });
     await client.request("/health");
+
+    assert.equal(sent.url, "/v0/management/plugins/cpa-usage-ma/api/health");
     assert.equal(client.credential().source, "panel");
     assert.equal(sent.options.headers.get("Authorization"), "Bearer panel-key");
     if (version === 2) assert.deepEqual(decodeCPAStorage(encode(version, payload), { ...env, userAgent: "Changed browser" }), payload);

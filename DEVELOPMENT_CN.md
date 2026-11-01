@@ -1,6 +1,8 @@
 # 本地二次开发
 
-Fork：<https://github.com/marven-buddy/cpa-usage>。开发分支：`dev/v8-local`。
+Fork：<https://github.com/marven-buddy/cpa-usage-ma>。开发分支：`dev/v8-local`。
+
+发布准备版本为 0.4.1，独立插件 ID 为 `cpa-usage-ma`。生产默认数据库、页面/API 和浏览器存储均与原版隔离；本机开发脚本继续显式指定 `.dev/data/usage.sqlite` 以保留已有模拟数据，不代表生产安装会自动迁移原插件。发布步骤见 [RELEASING_CN.md](RELEASING_CN.md)。
 
 本机为 Windows amd64，部署目标为 CLIProxyAPI v8 / Linux amd64。Windows 本地环境运行真实 CPA v8 宿主与插件 DLL；Linux 产物独立构建，不能在 Windows 上完成 .so 加载验证。
 
@@ -49,7 +51,7 @@ Smoke 经 CPA 发送客户端 A 的普通请求、SSE 请求和故意失败请�
 本地运行文件全部位于 `.dev/`，已加入 .gitignore：
 
 - `data/usage.sqlite`：开发数据库，停止/重启保留。
-- `plugins/windows/amd64/usage-report.dll`：开发插件。
+- `plugins/windows/amd64/cpa-usage-ma.dll`：开发插件。
 - `config.yaml`、`management-key`：隔离配置与随机开发管理密钥。
 - `*.log`、`*.error.log`：服务日志。
 - `processes.json`：服务 PID 和启动时间，Stop 仅终止匹配的本任务进程。
@@ -70,16 +72,18 @@ Windows 便携交叉构建：
 
 ```powershell
 ./scripts/build-linux.ps1
+# 生成注入正式版本号的候选 ZIP 与校验和（不发布）
+./scripts/build-linux.ps1 -Release
 ```
 
-输出 `dist/linux/amd64/usage-report.so`，默认 glibc 2.31 基线。应在目标 Linux 宿主完成真实加载验收；Alpine/musl 需要单独构建，不能混用 glibc 产物。
+输出 `dist/linux/amd64/cpa-usage-ma.so`，默认 glibc 2.31 基线。应在目标 Linux 宿主完成真实加载验收；Alpine/musl 需要单独构建，不能混用 glibc 产物。
 
 也可在 Linux amd64 安装 Go 1.27 与 GCC 后原生构建：
 
 ```bash
 cd plugin
 CGO_ENABLED=1 go test ./...
-CGO_ENABLED=1 go build -buildmode=c-shared -o usage-report.so .
+CGO_ENABLED=1 go build -buildmode=c-shared -o cpa-usage-ma.so .
 ```
 
 ## 本次必要适配
@@ -100,7 +104,7 @@ CGO_ENABLED=1 go build -buildmode=c-shared -o usage-report.so .
 - 普通请求、SSE、失败请求经真实 CPA 路由后正确写入 SQLite；禁用内置 Usage 统计时仍正常采集。
 - 未认证统计 API 访问被拒绝；浏览器页面能读取开发数据库，未出现 JavaScript 运行错误。
 - 服务停止、重启与历史保留验证通过；生产构建没有包含开发管理密钥或开发认证入口。
-- Linux amd64/glibc 交叉构建成功，产物为 `dist/linux/amd64/usage-report.so`。尚未在真实 Linux 宿主加载该产物。
+- Linux amd64/glibc 交叉构建成功，产物为 `dist/linux/amd64/cpa-usage-ma.so`。尚未在真实 Linux 宿主加载该产物。
 
 ## 认证修复验证（2026-11-01）
 

@@ -1,4 +1,4 @@
-module usage-report
+module cpa-usage-ma
 
 go 1.27
 

@@ -127,7 +127,7 @@ func TestInvalidAbsoluteDateRangeReturnsBadRequest(t *testing.T) {
 			q[key] = value
 		}
 		q[tc.key] = []string{tc.value}
-		req, _ := json.Marshal(map[string]any{"Method": "GET", "Path": "/v0/management/plugins/usage-report/api/usage", "Query": q})
+		req, _ := json.Marshal(map[string]any{"Method": "GET", "Path": "/v0/management/plugins/cpa-usage-ma/api/usage", "Query": q})
 		raw, err := handleManagement(req)
 		if err != nil {
 			t.Fatal(err)

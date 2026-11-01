@@ -1,6 +1,6 @@
 import { convertUSD, DEFAULT_FX_RATE } from "./analytics.js";
 
-export const CURRENCY_STORAGE_KEY = "cpa-usage-currency";
+export const CURRENCY_STORAGE_KEY = "cpa-usage-ma-currency";
 export const validFxRate = (n) => Number.isFinite(n) && n > 0;
 export function readCurrencySettings(storage) {
   try {

@@ -193,7 +193,7 @@ function App() {
     [page, setPage] = useState(0),
     [sort, setSort] = useState("tokens"),
     [dark, setDark] = useState(
-      () => { try { return browserStorage("localStorage")?.getItem("cpa-usage-theme") === "dark"; } catch { return false; } },
+      () => { try { return browserStorage("localStorage")?.getItem("cpa-usage-ma-theme") === "dark"; } catch { return false; } },
     );
   const generation = useRef(0);
   const authRevision = useRef(0);
@@ -202,7 +202,7 @@ function App() {
   useEffect(() => saveCurrencySettings(currencySettings), [currencySettings]);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    try { browserStorage("localStorage")?.setItem("cpa-usage-theme", dark ? "dark" : "light"); } catch { /* Theme remains page-local. */ }
+    try { browserStorage("localStorage")?.setItem("cpa-usage-ma-theme", dark ? "dark" : "light"); } catch { /* Theme remains page-local. */ }
   }, [dark]);
   async function request(path, options = {}) {
     const revision = authRevision.current;
@@ -338,7 +338,7 @@ function App() {
               <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Activity className="size-4" />
               </span>
-              CPA Usage
+              cpa-usage-ma
               <Badge
                 variant="outline"
                 className="hidden sm:inline-flex font-normal text-muted-foreground"

@@ -1,5 +1,5 @@
-export const SESSION_KEY = "cpa-usage-management-key";
-const API_BASE = "/v0/management/plugins/usage-report/api";
+export const SESSION_KEY = "cpa-usage-ma-management-key";
+const API_BASE = "/v0/management/plugins/cpa-usage-ma/api";
 
 export class AuthError extends Error {
   constructor(code, message) {
@@ -67,7 +67,7 @@ export function createManagementClient({ localStorage, sessionStorage, host, use
       if (!key) throw new AuthError("missing_key", "请输入 CPA 管理密钥。");
       // Verify the supplied key directly; never fall back to panel or development credentials.
       const health = await send("/health", {}, key);
-      if (health.service !== "cpa-usage") throw Error("管理接口响应不符合预期，请检查插件地址。");
+      if (health.service !== "cpa-usage-ma") throw Error("管理接口响应不符合预期，请检查插件地址。");
       // A failed verification must leave the existing credential intact.
       manualKey = key;
       let persisted = false;

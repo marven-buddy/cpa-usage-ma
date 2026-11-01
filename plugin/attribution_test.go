@@ -32,7 +32,7 @@ func sendAttribution(t *testing.T, u usageRecord) {
 
 func attributionResponse(t *testing.T) ([]outEvent, []outBucket, []byte) {
 	t.Helper()
-	status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/usage", "GET")
+	status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/usage", "GET")
 	if status != 200 {
 		t.Fatalf("HTTP %d: %s", status, body)
 	}

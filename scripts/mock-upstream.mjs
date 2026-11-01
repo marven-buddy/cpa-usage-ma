@@ -11,7 +11,7 @@ http.createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
   };
-  if (req.url === "/health") return json(200, { service: "cpa-usage-local-upstream" });
+  if (req.url === "/health") return json(200, { service: "cpa-usage-ma-local-upstream" });
   if (req.url === "/v1/models") return json(200, { object: "list", data: [{ id: model, object: "model", owned_by: "local-dev" }] });
   if (req.method !== "POST" || req.url !== "/v1/chat/completions") return json(404, { error: { message: "Not found" } });
   try {

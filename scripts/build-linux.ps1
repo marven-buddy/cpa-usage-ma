@@ -1,4 +1,7 @@
-param([string]$Glibc = '2.31')
+param(
+    [ValidatePattern('^\d+\.\d+$')][string]$Glibc = '2.31',
+    [switch]$Release
+)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $toolsRoot = Join-Path (Split-Path $repoRoot -Parent) '.tools'
@@ -17,11 +20,26 @@ try {
     $outDir = Join-Path $repoRoot 'dist/linux/amd64'
     New-Item -ItemType Directory -Force $outDir | Out-Null
     $version = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
-    & $goExe -C (Join-Path $repoRoot 'plugin') build -buildmode=c-shared -trimpath -ldflags "-s -w -X main.version=$version-dev" -o (Join-Path $outDir 'usage-report.so') .
+    $buildVersion = if ($Release) { $version } else { "$version-dev" }
+    & $goExe -C (Join-Path $repoRoot 'plugin') build -buildmode=c-shared -trimpath -ldflags "-s -w -X main.version=$buildVersion" -o (Join-Path $outDir 'cpa-usage-ma.so') .
     if ($LASTEXITCODE -ne 0) { throw 'Linux plugin build failed.' }
-    $digest = (Get-FileHash (Join-Path $outDir 'usage-report.so') -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$digest  usage-report.so" | Set-Content (Join-Path $outDir 'checksums.txt') -Encoding ascii
-    Write-Host "Linux amd64 plugin: $outDir/usage-report.so (glibc >= $Glibc)"
+    $digest = (Get-FileHash (Join-Path $outDir 'cpa-usage-ma.so') -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$digest  cpa-usage-ma.so" | Set-Content (Join-Path $outDir 'checksums.txt') -Encoding ascii
+    Write-Host "Linux amd64 plugin: $outDir/cpa-usage-ma.so (glibc >= $Glibc)"
+    if ($Release) {
+        $releaseDir = Join-Path $repoRoot "dist/release/$version/linux-amd64"
+        $packageDir = Join-Path $releaseDir 'package'
+        New-Item -ItemType Directory -Force $packageDir | Out-Null
+        $library = Join-Path $packageDir "cpa-usage-ma-v$version.so"
+        Copy-Item -LiteralPath (Join-Path $outDir 'cpa-usage-ma.so') -Destination $library -Force
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE'),(Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDir -Force
+        $zipName = "cpa-usage-ma_${version}_linux_amd64.zip"
+        $zipPath = Join-Path $releaseDir $zipName
+        Compress-Archive -LiteralPath $library,(Join-Path $packageDir 'LICENSE'),(Join-Path $packageDir 'THIRD_PARTY_NOTICES.md') -DestinationPath $zipPath -Force
+        $zipDigest = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$zipDigest  $zipName" | Set-Content (Join-Path $releaseDir 'checksums.txt') -Encoding ascii
+        Write-Host "Release candidate: $zipPath"
+    }
 } finally {
     foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
 }

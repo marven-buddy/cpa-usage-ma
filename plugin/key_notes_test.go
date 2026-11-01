@@ -9,7 +9,7 @@ import (
 
 func callKeyNote(t *testing.T, method string, body []byte) (int, []byte) {
 	t.Helper()
-	req, err := json.Marshal(map[string]any{"Method": method, "Path": "/v0/management/plugins/usage-report/api/key-note", "Body": body})
+	req, err := json.Marshal(map[string]any{"Method": method, "Path": "/v0/management/plugins/cpa-usage-ma/api/key-note", "Body": body})
 	if err != nil {
 		t.Fatal(err)
 	}

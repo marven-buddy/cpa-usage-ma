@@ -173,7 +173,7 @@ func TestPriceUpdateFailureIsFriendly(t *testing.T) {
 	count := len(book.versions)
 
 	t.Run("failed update", func(t *testing.T) {
-		status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/pricing/refresh", "POST")
+		status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/pricing/refresh", "POST")
 		var response struct {
 			Error string `json:"error"`
 		}
@@ -292,7 +292,7 @@ func TestCostAPIFromRawUsage(t *testing.T) {
 	for _, model := range []string{"alias", "unknown-alias"} {
 		handleUsage([]byte(fmt.Sprintf(`{"result":{"Provider":"claude","Model":%q,"Source":"secret-key","RequestedAt":"2026-09-10T11:30:00+08:00","Detail":{"InputTokens":300000,"OutputTokens":100000,"CacheReadTokens":600000,"CacheCreationTokens":100000,"TotalTokens":1100000}}}`, model)))
 	}
-	status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/usage", "GET")
+	status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/usage", "GET")
 	if status != 200 {
 		t.Fatalf("HTTP %d: %s", status, body)
 	}
@@ -326,7 +326,7 @@ func TestPricingManagementWrite(t *testing.T) {
 		{"POST", `{"model":"management-alias","price":{"input":-1,"output":8}}`, 400},
 		{"DELETE", `{}`, 405},
 	} {
-		request, _ := json.Marshal(map[string]any{"result": map[string]any{"Method": tc.method, "Path": "/v0/management/plugins/usage-report/api/pricing", "Body": []byte(tc.body)}})
+		request, _ := json.Marshal(map[string]any{"result": map[string]any{"Method": tc.method, "Path": "/v0/management/plugins/cpa-usage-ma/api/pricing", "Body": []byte(tc.body)}})
 		raw, err := handleMethod("management.handle", request)
 		if err != nil {
 			t.Fatal(err)

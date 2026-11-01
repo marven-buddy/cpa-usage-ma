@@ -80,7 +80,7 @@ var webFS embed.FS
 const abiVersion uint32 = 1
 
 // version is injected at release time via -ldflags "-X main.version=..."
-var version = "0.2.1"
+var version = "0.4.1-dev"
 
 type envelope struct {
 	OK     bool            `json:"ok"`
@@ -162,19 +162,19 @@ func handleMethod(method string, req []byte) ([]byte, error) {
 		if err := applyConfig(req); err != nil {
 			return nil, err
 		}
-		return okEnvelopeJSON(`{"schema_version":6,"metadata":{"Name":"usage-report","Version":"` + version + `","Author":"local","GitHubRepository":"https://github.com/andyWang1688/cpa-usage","Logo":"","ConfigFields":[]},"capabilities":{"usage_plugin":true,"management_api":true}}`)
+		return okEnvelopeJSON(`{"schema_version":6,"metadata":{"Name":"cpa-usage-ma","Version":"` + version + `","Author":"marven-buddy","GitHubRepository":"https://github.com/marven-buddy/cpa-usage-ma","Logo":"","ConfigFields":[]},"capabilities":{"usage_plugin":true,"management_api":true}}`)
 	case "management.register":
 		return okEnvelopeJSON(`{"routes":[
-			{"Method":"GET","Path":"/plugins/usage-report/api/usage","Menu":"","Description":"usage data api"},
-			{"Method":"GET","Path":"/plugins/usage-report/api/health","Menu":"","Description":"health"},
-			{"Method":"POST","Path":"/plugins/usage-report/api/collect","Menu":"","Description":"collect trigger"},
-			{"Method":"POST","Path":"/plugins/usage-report/api/key-note","Menu":"","Description":"set or clear Key note"},
-			{"Method":"GET","Path":"/plugins/usage-report/api/pricing","Menu":"","Description":"model prices"},
-			{"Method":"POST","Path":"/plugins/usage-report/api/pricing","Menu":"","Description":"custom model price"},
-			{"Method":"POST","Path":"/plugins/usage-report/api/pricing/refresh","Menu":"","Description":"refresh public prices"}
+			{"Method":"GET","Path":"/plugins/cpa-usage-ma/api/usage","Menu":"","Description":"usage data api"},
+			{"Method":"GET","Path":"/plugins/cpa-usage-ma/api/health","Menu":"","Description":"health"},
+			{"Method":"POST","Path":"/plugins/cpa-usage-ma/api/collect","Menu":"","Description":"collect trigger"},
+			{"Method":"POST","Path":"/plugins/cpa-usage-ma/api/key-note","Menu":"","Description":"set or clear Key note"},
+			{"Method":"GET","Path":"/plugins/cpa-usage-ma/api/pricing","Menu":"","Description":"model prices"},
+			{"Method":"POST","Path":"/plugins/cpa-usage-ma/api/pricing","Menu":"","Description":"custom model price"},
+			{"Method":"POST","Path":"/plugins/cpa-usage-ma/api/pricing/refresh","Menu":"","Description":"refresh public prices"}
 		],"resources":[
-			{"Path":"/report","Menu":"Usage Report","Description":"CPA usage dashboard"},
-			{"Path":"/assets/index-BQjrGGWY.js","Menu":"","Description":"dashboard js"},
+			{"Path":"/report","Menu":"cpa-usage-ma","Description":"CLIProxyAPI v8 usage dashboard"},
+			{"Path":"/assets/index-Cp--UGfL.js","Menu":"","Description":"dashboard js"},
 			{"Path":"/assets/index-BhRVZS53.css","Menu":"","Description":"dashboard css"}
 		]}`)
 	case "usage.handle":
@@ -244,9 +244,9 @@ func applyConfig(req []byte) error {
 func defaultDBPath() string {
 	u, err := user.Current()
 	if err != nil {
-		return "usage.sqlite"
+		return filepath.Join("cpa-usage-ma", "usage.sqlite")
 	}
-	return filepath.Join(u.HomeDir, ".cli-proxy-api", "usage-report.sqlite")
+	return filepath.Join(u.HomeDir, ".cli-proxy-api", "cpa-usage-ma", "usage.sqlite")
 }
 
 func openDB(path string) error {
@@ -431,8 +431,8 @@ func handleManagement(req []byte) ([]byte, error) {
 		}
 		return managementResponse(200, "text/html; charset=utf-8", html)
 	}
-	if strings.HasSuffix(m.Path, "/assets/index-BQjrGGWY.js") {
-		js, err := webFS.ReadFile("web/assets/index-BQjrGGWY.js")
+	if strings.HasSuffix(m.Path, "/assets/index-Cp--UGfL.js") {
+		js, err := webFS.ReadFile("web/assets/index-Cp--UGfL.js")
 		if err != nil {
 			return errorEnvelope("asset_missing", err.Error()), nil
 		}
@@ -446,7 +446,7 @@ func handleManagement(req []byte) ([]byte, error) {
 		return managementResponse(200, "text/css; charset=utf-8", css)
 	}
 	if strings.HasSuffix(m.Path, "/api/health") {
-		body, _ := json.Marshal(map[string]interface{}{"service": "cpa-usage", "version": version, "pid": 0})
+		body, _ := json.Marshal(map[string]interface{}{"service": "cpa-usage-ma", "version": version, "pid": 0})
 		return managementResponse(200, "application/json; charset=utf-8", body)
 	}
 	if strings.HasSuffix(m.Path, "/api/collect") {

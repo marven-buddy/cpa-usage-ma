@@ -28,7 +28,7 @@ function Build-Plugin {
     $outDir = Join-Path $devRoot 'plugins/windows/amd64'
     New-Item -ItemType Directory -Force $outDir | Out-Null
     $version = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
-    Invoke-Checked $goExe @('-C', (Join-Path $repoRoot 'plugin'), 'build', '-buildmode=c-shared', '-ldflags', "-X main.version=$version-dev", '-o', (Join-Path $outDir 'usage-report.dll'), '.')
+    Invoke-Checked $goExe @('-C', (Join-Path $repoRoot 'plugin'), 'build', '-buildmode=c-shared', '-ldflags', "-X main.version=$version-dev", '-o', (Join-Path $outDir 'cpa-usage-ma.dll'), '.')
 }
 
 function Get-DevState {
@@ -117,7 +117,7 @@ plugins:
   enabled: true
   dir: '$plugins'
   configs:
-    usage-report:
+    cpa-usage-ma:
       enabled: true
       db_path: '$database'
 "@ | Set-Content (Join-Path $devRoot 'config.yaml') -Encoding utf8
@@ -144,7 +144,7 @@ plugins:
     'Smoke' {
         $base = 'http://127.0.0.1:18317'
         $today = Get-Date -Format 'yyyy-MM-dd'
-        $api = "$base/v0/management/plugins/usage-report/api/usage?start=$today&end=$today&bucket=hour"
+        $api = "$base/v0/management/plugins/cpa-usage-ma/api/usage?start=$today&end=$today&bucket=hour"
         $authHeaders = @{ Authorization = "Bearer $(Read-Key)" }
         $before = Invoke-RestMethod -Uri $api -Headers $authHeaders -NoProxy
         $beforeCount = @($before.events).Count

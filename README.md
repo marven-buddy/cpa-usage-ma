@@ -27,7 +27,7 @@ plugins:
 ```
 
 2. 重启 CLIProxyAPI，打开管理面板 → **插件商店** → 找到 **CPA Usage Report** → 安装。
-3. 打开 **插件 → Usage Report**（或访问 `/v0/resource/plugins/usage-report/report`）。页面首次打开时会提示输入 **CPA 管理密钥**（保存在浏览器本地，用于访问受保护的插件 API）。
+3. 打开 **插件 → Usage Report**（或访问 `/v0/resource/plugins/usage-report/report`）。页面会自动复用同源后台已保存的管理凭据（兼容 v1/v2 格式）；未保存后台密码时，可直接在插件右上角的 **管理密钥** 中输入 **CPA 管理密钥**，无需勾选后台的“记住密码”。输入的密钥验证成功后仅保存在当前标签会话；可随时清除，不影响后台登录。浏览器禁用会话存储时仅在当前页面内存保留，刷新需重新输入。
 
 > CPA 访问 GitHub API 查插件信息有匿名频率限制；若遇到 rate limit，可为 CPA 进程配置 `GITHUB_TOKEN` 环境变量，并在 `plugins.store-auth` 添加 `type: github-token`、`token-env: GITHUB_TOKEN` 的规则。
 
@@ -53,13 +53,16 @@ go build -buildmode=c-shared -o usage-report.dylib .   # macOS；Linux 产物为
 
 - 页面：`/v0/resource/plugins/usage-report/report`
 - 数据 API（需认证）：`/v0/management/plugins/usage-report/api/usage?start=YYYY-MM-DD&end=YYYY-MM-DD&bucket=day|hour|month`，请求头 `Authorization: Bearer <管理密钥>`
+- 新页面使用 `start_at`、`end_at`（含时区的 RFC3339 时间）与 `timezone`（浏览器 IANA 时区，例如 `Asia/Shanghai`）；范围为包含开始、不包含结束，三者必须一起传入，不能和旧 `start`/`end` 混用。旧日期参数继续按服务器本地时区解释。
 - 任何经过该 CPA 实例的请求（Codex CLI、OpenCode、其他客户端）都会自动记录。
 
 界面能力：
 
 - 今天、近 7/30 天与自定义日期范围；模型筛选同时作用于 KPI、趋势和明细。
+- 日期和趋势统一使用浏览器时区，页脚显示统计时区；查询使用当地零点对应的 UTC 边界，夏令时切换当天也会完整统计。
 - 缓存输入 / 净输入 / 输出堆叠趋势，小时 / 天 / 月粒度。
 - 模型、匿名 Key、请求三个视角；搜索、排序与分页。
+- 在“按 Key”视图点击铅笔填写备注；留空保存可清除。备注保存在 SQLite，刷新后保留，可搜索，并同步显示在请求明细中。
 - 全部请求参与成功率统计，包括零 Token 失败；输入含缓存，输出含推理，不重复相加。
 - 错误、空数据与采集异常明确显示，不把空白或旧数据当实时成功。
 - 预估费用卡片、Token / 费用趋势切换；模型、匿名 Key、请求明细显示费用并支持费用排序。
@@ -93,8 +96,10 @@ go build -buildmode=c-shared -o usage-report.dylib .   # macOS；Linux 产物为
 
 ## 数据与安全
 
-- 用量事件保存在 `db_path` 指向的本地 SQLite（表 `usage_events`），页面 API 在返回前将 Key 转换为稳定的匿名分组（`key-xxxxxxxxxx` 或 `未知 Key`）。
-- 原始事件仅保存在本地，可能包含客户端 Key；不要将数据库公开上传。
+- 用量事件保存在 `db_path` 指向的本地 SQLite（表 `usage_events`）。新记录按客户端 APIKey 与鉴权来源生成稳定的完整 SHA-256 标识，调用不同模型或轮换上游账号不会拆分同一客户端；不同客户端共用上游账号也不会合并。
+- 页面显示短标签 `key-xxxxxxxxxx`，内部使用完整标识分组；缺少 APIKey 时显示“未知客户端”，不会回退使用上游 Source。上游 AuthID/Source 单独生成匿名来源标识，新记录不保存这些字段或客户端密钥的原文。
+- 升级前记录保留原样，标为“历史来源 · 客户端未知”，与新客户端统计分开；仍计入模型、Token 和费用汇总。历史记录可能包含密钥或账号来源原文，不要将数据库公开上传。
+- 用量 API 中 `key` 是完整分组标识，`key_label` 用于显示，`key_kind` 为 `client`、`unknown` 或 `legacy_source`；`upstream_id` 为独立上游标识。`key_note` 为手动备注，仅修改显示，不改变统计归属；相同备注不会合并不同 Key。未添加原 Key 匹配或脱敏尾号功能。
 - 插件的资源页面无独立鉴权，仅在 CPA 管理域内可达；请勿将 CPA 管理端口暴露到公网。
 
 ## 开发

@@ -14,3 +14,5 @@ dist/
 .DS_Store
 plugin/usage-report
 plugin/usage-report.test
+plugin/*.dll
+.dev/

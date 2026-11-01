@@ -56,7 +56,6 @@ static void free_host_buffer(void* ptr, size_t len) {
 import "C"
 
 import (
-	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
 	"embed"
@@ -160,20 +159,23 @@ func cliproxyPluginShutdown() {
 func handleMethod(method string, req []byte) ([]byte, error) {
 	switch method {
 	case "plugin.register", "plugin.reconfigure":
-		applyConfig(req)
-		return okEnvelopeJSON(`{"schema_version":1,"metadata":{"Name":"usage-report","Version":"` + version + `","Author":"local","GitHubRepository":"https://github.com/andyWang1688/cpa-usage","Logo":"","ConfigFields":[]},"capabilities":{"usage_plugin":true,"management_api":true}}`)
+		if err := applyConfig(req); err != nil {
+			return nil, err
+		}
+		return okEnvelopeJSON(`{"schema_version":6,"metadata":{"Name":"usage-report","Version":"` + version + `","Author":"local","GitHubRepository":"https://github.com/andyWang1688/cpa-usage","Logo":"","ConfigFields":[]},"capabilities":{"usage_plugin":true,"management_api":true}}`)
 	case "management.register":
 		return okEnvelopeJSON(`{"routes":[
 			{"Method":"GET","Path":"/plugins/usage-report/api/usage","Menu":"","Description":"usage data api"},
 			{"Method":"GET","Path":"/plugins/usage-report/api/health","Menu":"","Description":"health"},
 			{"Method":"POST","Path":"/plugins/usage-report/api/collect","Menu":"","Description":"collect trigger"},
+			{"Method":"POST","Path":"/plugins/usage-report/api/key-note","Menu":"","Description":"set or clear Key note"},
 			{"Method":"GET","Path":"/plugins/usage-report/api/pricing","Menu":"","Description":"model prices"},
 			{"Method":"POST","Path":"/plugins/usage-report/api/pricing","Menu":"","Description":"custom model price"},
 			{"Method":"POST","Path":"/plugins/usage-report/api/pricing/refresh","Menu":"","Description":"refresh public prices"}
 		],"resources":[
 			{"Path":"/report","Menu":"Usage Report","Description":"CPA usage dashboard"},
-			{"Path":"/assets/index-WH-FNvxu.js","Menu":"","Description":"dashboard js"},
-			{"Path":"/assets/index-DWD1CSj_.css","Menu":"","Description":"dashboard css"}
+			{"Path":"/assets/index-BQjrGGWY.js","Menu":"","Description":"dashboard js"},
+			{"Path":"/assets/index-BhRVZS53.css","Menu":"","Description":"dashboard css"}
 		]}`)
 	case "usage.handle":
 		handleUsage(req)
@@ -187,12 +189,17 @@ func handleMethod(method string, req []byte) ([]byte, error) {
 
 // ---- config ----
 
-func applyConfig(req []byte) {
+func applyConfig(req []byte) error {
 	var parsed struct {
-		ConfigYaml string `json:"config_yaml"`
+		ConfigYaml json.RawMessage `json:"config_yaml"`
 	}
-	_ = json.Unmarshal(req, &parsed)
-	if parsed.ConfigYaml == "" {
+	if len(req) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(req, &parsed); err != nil {
+		return fmt.Errorf("decode plugin configuration: %w", err)
+	}
+	if len(parsed.ConfigYaml) == 0 {
 		// Some host versions wrap the payload in a {"result": {...}} envelope.
 		var wrapped struct {
 			Result json.RawMessage `json:"result"`
@@ -201,11 +208,20 @@ func applyConfig(req []byte) {
 			_ = json.Unmarshal(wrapped.Result, &parsed)
 		}
 	}
-	if parsed.ConfigYaml == "" {
-		return
+	if len(parsed.ConfigYaml) == 0 || string(parsed.ConfigYaml) == "null" {
+		return nil
+	}
+	// Current hosts encode []byte as Base64; retain legacy plaintext support.
+	var configBytes []byte
+	if err := json.Unmarshal(parsed.ConfigYaml, &configBytes); err != nil {
+		var plaintext string
+		if err := json.Unmarshal(parsed.ConfigYaml, &plaintext); err != nil {
+			return fmt.Errorf("decode config_yaml: %w", err)
+		}
+		configBytes = []byte(plaintext)
 	}
 	path := ""
-	for _, line := range strings.Split(parsed.ConfigYaml, "\n") {
+	for _, line := range strings.Split(string(configBytes), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "db_path:") {
 			path = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "db_path:")), `"'`)
@@ -213,14 +229,16 @@ func applyConfig(req []byte) {
 		}
 	}
 	if path == "" {
-		return
+		return nil
 	}
-	if strings.HasPrefix(path, "~") {
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
 		if u, err := user.Current(); err == nil {
-			path = filepath.Join(u.HomeDir, path[2:])
+			path = filepath.Join(u.HomeDir, strings.TrimLeft(path[1:], "/\\"))
+		} else {
+			return fmt.Errorf("resolve database home directory: %w", err)
 		}
 	}
-	openDB(path)
+	return openDB(path)
 }
 
 func defaultDBPath() string {
@@ -231,39 +249,53 @@ func defaultDBPath() string {
 	return filepath.Join(u.HomeDir, ".cli-proxy-api", "usage-report.sqlite")
 }
 
-func openDB(path string) {
+func openDB(path string) error {
 	mu.Lock()
 	defer mu.Unlock()
+	return openDBLocked(path)
+}
+
+func openDBLocked(path string) error {
 	if db != nil && path != "" && lastOpened == path {
-		return
+		return nil
 	}
-	if db != nil {
-		_ = db.Close()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		lastErr = "sqlite directory: " + err.Error()
+		return fmt.Errorf("%s", lastErr)
 	}
 	conn, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		lastErr = "sqlite open: " + err.Error()
-		return
+		return fmt.Errorf("%s", lastErr)
 	}
 	_, err = conn.Exec("CREATE TABLE IF NOT EXISTS usage_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, dedup TEXT UNIQUE, payload TEXT)")
+	if err == nil {
+		_, err = conn.Exec("CREATE TABLE IF NOT EXISTS key_notes (key_id TEXT PRIMARY KEY, note TEXT NOT NULL)")
+	}
 	if err == nil {
 		err = initPricing(conn)
 	}
 	if err != nil {
 		lastErr = "sqlite migrate: " + err.Error()
 		_ = conn.Close()
-		return
+		return fmt.Errorf("%s", lastErr)
+	}
+	if db != nil {
+		_ = db.Close()
 	}
 	db = conn
 	lastOpened = path
 	lastErr = ""
+	return nil
 }
 
 var lastOpened string
 
 func ensureDB() {
+	mu.Lock()
+	defer mu.Unlock()
 	if db == nil {
-		openDB(defaultDBPath())
+		_ = openDBLocked(defaultDBPath())
 	}
 }
 
@@ -298,41 +330,39 @@ func handleUsage(req []byte) {
 		ts = time.Now()
 	}
 	tokens := map[string]int64{
-		"input_tokens":           u.Detail.InputTokens,
-		"output_tokens":          u.Detail.OutputTokens,
-		"reasoning_tokens":       u.Detail.ReasoningTokens,
-		"cached_tokens":          u.Detail.CachedTokens,
-		"cache_read_tokens":      u.Detail.CacheReadTokens,
-		"cache_creation_tokens":  u.Detail.CacheCreationTokens,
-		"total_tokens":           u.Detail.TotalTokens,
+		"input_tokens":          u.Detail.InputTokens,
+		"output_tokens":         u.Detail.OutputTokens,
+		"reasoning_tokens":      u.Detail.ReasoningTokens,
+		"cached_tokens":         u.Detail.CachedTokens,
+		"cache_read_tokens":     u.Detail.CacheReadTokens,
+		"cache_creation_tokens": u.Detail.CacheCreationTokens,
+		"total_tokens":          u.Detail.TotalTokens,
 	}
-	source := u.Source
-	if source == "" {
-		source = u.APIKey
-	}
+	clientID := clientIdentity(u.APIKey, u.AccessProvider)
+	upstreamID := upstreamIdentity(u)
 	event := map[string]interface{}{
-		"timestamp":  ts.Format(time.RFC3339Nano),
-		"model":      model,
-		"source":     source,
-		"failed":     u.Failed,
-		"latency_ms": float64(u.Latency) / float64(time.Millisecond),
-		"ttft_ms":    float64(u.TTFT) / float64(time.Millisecond),
-		"tokens":     tokens,
+		"event_version":   2,
+		"timestamp":       ts.Format(time.RFC3339Nano),
+		"model":           model,
+		"client_id":       clientID,
+		"access_provider": strings.TrimSpace(u.AccessProvider),
+		"upstream_id":     upstreamID,
+		"provider":        u.Provider,
+		"executor_type":   u.ExecutorType,
+		"request_id":      u.RequestID,
+		"selection_id":    u.SelectionID,
+		"failed":          u.Failed,
+		"latency_ms":      float64(u.Latency) / float64(time.Millisecond),
+		"ttft_ms":         float64(u.TTFT) / float64(time.Millisecond),
+		"tokens":          tokens,
 	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
-	digest := sha1.Sum(payload)
-	// Keep the existing dedup identity when adding optional protocol metadata.
-	if u.Provider != "" || u.ExecutorType != "" {
-		event["provider"] = u.Provider
-		event["executor_type"] = u.ExecutorType
-		payload, err = json.Marshal(event)
-		if err != nil {
-			return
-		}
-	}
+	// Versioned identities keep clients, providers, and side-model events distinct.
+	// Existing rows retain their original dedup values; no historical rewrite is needed.
+	digest := sha256.Sum256(payload)
 
 	ensureDB()
 	mu.Lock()
@@ -341,15 +371,19 @@ func handleUsage(req []byte) {
 		return
 	}
 	_, _ = db.Exec("INSERT OR IGNORE INTO usage_events (ts, dedup, payload) VALUES (?,?,?)",
-		ts.Format("2006-01-02 15:04:05"), hex.EncodeToString(digest[:]), string(payload))
+		ts.Format("2006-01-02 15:04:05"), "v2:"+hex.EncodeToString(digest[:]), string(payload))
 }
 
 type usageRecord struct {
+	RequestID       string
+	SelectionID     string
 	Provider        string
 	ExecutorType    string
 	Model           string
 	Alias           string
 	APIKey          string
+	AccessProvider  string
+	AuthID          string
 	Source          string
 	ReasoningEffort string
 	RequestedAt     time.Time
@@ -397,15 +431,15 @@ func handleManagement(req []byte) ([]byte, error) {
 		}
 		return managementResponse(200, "text/html; charset=utf-8", html)
 	}
-	if strings.HasSuffix(m.Path, "/assets/index-WH-FNvxu.js") {
-		js, err := webFS.ReadFile("web/assets/index-WH-FNvxu.js")
+	if strings.HasSuffix(m.Path, "/assets/index-BQjrGGWY.js") {
+		js, err := webFS.ReadFile("web/assets/index-BQjrGGWY.js")
 		if err != nil {
 			return errorEnvelope("asset_missing", err.Error()), nil
 		}
 		return managementResponse(200, "application/javascript; charset=utf-8", js)
 	}
-	if strings.HasSuffix(m.Path, "/assets/index-DWD1CSj_.css") {
-		css, err := webFS.ReadFile("web/assets/index-DWD1CSj_.css")
+	if strings.HasSuffix(m.Path, "/assets/index-BhRVZS53.css") {
+		css, err := webFS.ReadFile("web/assets/index-BhRVZS53.css")
 		if err != nil {
 			return errorEnvelope("asset_missing", err.Error()), nil
 		}
@@ -427,6 +461,16 @@ func handleManagement(req []byte) ([]byte, error) {
 			return managementResponse(400, "application/json; charset=utf-8", b)
 		}
 		return managementResponse(200, "application/json; charset=utf-8", body)
+	}
+	if strings.HasSuffix(m.Path, "/api/key-note") {
+		if m.Method != "POST" {
+			return managementResponse(405, "application/json", []byte(`{"error":"请求方法不支持"}`))
+		}
+		if err := setKeyNote(m.Body); err != nil {
+			body, _ := json.Marshal(map[string]string{"error": err.Error()})
+			return managementResponse(400, "application/json; charset=utf-8", body)
+		}
+		return managementResponse(200, "application/json", []byte(`{"ok":true}`))
 	}
 	if strings.HasSuffix(m.Path, "/api/pricing") || strings.HasSuffix(m.Path, "/api/pricing/refresh") {
 		ensureDB()
@@ -471,33 +515,42 @@ func managementResponse(status int, contentType string, body []byte) ([]byte, er
 // ---- usage api (compatible with cpa-usage frontend contract) ----
 
 type dbEvent struct {
-	Timestamp    string         `json:"timestamp"`
-	Model        string         `json:"model"`
-	Provider     string         `json:"provider"`
-	ExecutorType string         `json:"executor_type"`
-	Alias        string         `json:"alias"`
-	Source       string         `json:"source"`
-	APIKey       string         `json:"api_key"`
-	Failed       bool           `json:"failed"`
-	LatencyMs    float64        `json:"latency_ms"`
-	TTFTMs       float64        `json:"ttft_ms"`
-	Tokens       map[string]any `json:"tokens"`
+	EventVersion   int            `json:"event_version"`
+	ClientID       string         `json:"client_id"`
+	AccessProvider string         `json:"access_provider"`
+	UpstreamID     string         `json:"upstream_id"`
+	Timestamp      string         `json:"timestamp"`
+	Model          string         `json:"model"`
+	Provider       string         `json:"provider"`
+	ExecutorType   string         `json:"executor_type"`
+	Alias          string         `json:"alias"`
+	Source         string         `json:"source"`
+	APIKey         string         `json:"api_key"`
+	Failed         bool           `json:"failed"`
+	LatencyMs      float64        `json:"latency_ms"`
+	TTFTMs         float64        `json:"ttft_ms"`
+	Tokens         map[string]any `json:"tokens"`
 }
 
 type outEvent struct {
 	costQuote
-	Ts            float64 `json:"ts"`
-	Model         string  `json:"model"`
-	Provider      string  `json:"provider"`
-	Key           string  `json:"key"`
-	Input         int64   `json:"input"`
-	Output        int64   `json:"output"`
-	Cache         int64   `json:"cache"`
-	CacheCreation int64   `json:"cache_creation"`
-	Reasoning     int64   `json:"reasoning"`
-	Failed        bool    `json:"failed"`
-	LatencyMs     float64 `json:"latency_ms"`
-	TTFTMs        float64 `json:"ttft_ms"`
+	Ts             float64 `json:"ts"`
+	Model          string  `json:"model"`
+	Provider       string  `json:"provider"`
+	Key            string  `json:"key"`
+	KeyLabel       string  `json:"key_label"`
+	KeyNote        string  `json:"key_note,omitempty"`
+	KeyKind        string  `json:"key_kind"`
+	AccessProvider string  `json:"access_provider,omitempty"`
+	UpstreamID     string  `json:"upstream_id,omitempty"`
+	Input          int64   `json:"input"`
+	Output         int64   `json:"output"`
+	Cache          int64   `json:"cache"`
+	CacheCreation  int64   `json:"cache_creation"`
+	Reasoning      int64   `json:"reasoning"`
+	Failed         bool    `json:"failed"`
+	LatencyMs      float64 `json:"latency_ms"`
+	TTFTMs         float64 `json:"ttft_ms"`
 }
 
 type outBucket struct {
@@ -518,6 +571,57 @@ func anonKey(source string) string {
 	return "key-" + hex.EncodeToString(sum[:])[:10]
 }
 
+func identityHash(namespace string, values ...string) string {
+	// JSON framing avoids ambiguity when opaque values contain separators.
+	raw, _ := json.Marshal(append([]string{namespace}, values...))
+	sum := sha256.Sum256(raw)
+	return namespace + "-" + hex.EncodeToString(sum[:])
+}
+
+func clientIdentity(apiKey, accessProvider string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	return identityHash("client", strings.TrimSpace(accessProvider), apiKey)
+}
+
+func upstreamIdentity(u usageRecord) string {
+	provider := strings.TrimSpace(u.Provider)
+	if authID := strings.TrimSpace(u.AuthID); authID != "" {
+		return identityHash("upstream-auth", provider, authID)
+	}
+	source := strings.TrimSpace(u.Source)
+	// The host can fall back to the client key when no upstream source exists.
+	if source == "" || source == strings.TrimSpace(u.APIKey) {
+		return ""
+	}
+	return identityHash("upstream-source", provider, source)
+}
+
+func eventKey(e dbEvent) (id, label, kind string) {
+	if e.EventVersion >= 2 {
+		if e.ClientID == "" {
+			return "client:unknown", "未知客户端", "unknown"
+		}
+		// Use the full identity for grouping; shortening is only for display.
+		digest := strings.TrimPrefix(e.ClientID, "client-")
+		if len(digest) > 10 {
+			digest = digest[:10]
+		}
+		return e.ClientID, "key-" + digest, "client"
+	}
+	// Old sources may be upstream accounts or client credentials. Do not guess.
+	source := e.Source
+	if source == "" {
+		source = e.APIKey
+	}
+	if source == "" {
+		return "legacy:unknown", "历史来源未知", "legacy_source"
+	}
+	return identityHash("legacy", source), "历史来源 · " + anonKey(source), "legacy_source"
+}
+
 func usageResponse(q map[string][]string) ([]byte, error) {
 	get := func(k string) string {
 		if v, ok := q[k]; ok && len(v) > 0 {
@@ -525,8 +629,6 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 		}
 		return ""
 	}
-	startStr := get("start")
-	endStr := get("end")
 	bucket := get("bucket")
 	if bucket == "" {
 		bucket = "day"
@@ -534,32 +636,10 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 	if bucket != "hour" && bucket != "day" && bucket != "month" {
 		return nil, fmt.Errorf("无效时间粒度")
 	}
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	var a, b time.Time
-	if startStr != "" {
-		var err error
-		a, err = time.ParseInLocation("2006-01-02", startStr, time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("无效开始日期")
-		}
-	} else {
-		a = today.AddDate(0, 0, -6)
+	window, rangeErr := parseUsageTimeRange(q)
+	if rangeErr != nil {
+		return nil, rangeErr
 	}
-	if endStr != "" {
-		var err error
-		b, err = time.ParseInLocation("2006-01-02", endStr, time.Local)
-		if err != nil {
-			return nil, fmt.Errorf("无效结束日期")
-		}
-	} else {
-		b = today
-	}
-	if a.After(b) {
-		return nil, fmt.Errorf("开始日期不能晚于结束日期")
-	}
-	lo := float64(a.Unix())
-	hi := float64(b.AddDate(0, 0, 1).Unix())
 
 	events := []outEvent{}
 	bins := map[string]*outBucket{}
@@ -572,8 +652,12 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 	var rows *sql.Rows
 	var err error
 	var prices *priceBook
+	var keyNotes map[string]string
 	if db != nil {
 		prices, err = loadPriceBook(db)
+		if err == nil {
+			keyNotes, err = loadKeyNotes(db)
+		}
 		if err == nil {
 			rows, err = db.Query("SELECT ts, payload FROM usage_events ORDER BY id")
 		}
@@ -598,14 +682,15 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 			if tsStr == "" {
 				tsStr = storedTs
 			}
-			ts, err := parseAnyTime(tsStr)
+			eventTime, err := parseAnyTime(tsStr)
 			if err != nil {
 				skipped++
 				continue
 			}
-			if ts < lo || ts >= hi {
+			if eventTime.Before(window.start) || !eventTime.Before(window.end) {
 				continue
 			}
+			ts := float64(eventTime.UnixNano()) / 1e9
 			model := e.Model
 			if model == "" {
 				model = e.Alias
@@ -613,10 +698,7 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 			if model == "" {
 				model = "unknown"
 			}
-			source := e.Source
-			if source == "" {
-				source = e.APIKey
-			}
+			key, keyLabel, keyKind := eventKey(e)
 			var input, output, cache, creation, reasoning int64
 			if t := e.Tokens; t != nil {
 				input = toI64(t["input_tokens"])
@@ -634,7 +716,9 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 				}
 			}
 			event := outEvent{
-				Ts: ts, Model: model, Key: anonKey(source),
+				Ts: ts, Model: model, Key: key, KeyLabel: keyLabel, KeyKind: keyKind,
+				KeyNote:        keyNotes[key],
+				AccessProvider: e.AccessProvider, UpstreamID: e.UpstreamID,
 				Input: input, Output: output, Cache: cache, Reasoning: reasoning,
 				Provider: e.Provider, CacheCreation: creation,
 				Failed: e.Failed, LatencyMs: e.LatencyMs, TTFTMs: e.TTFTMs,
@@ -644,7 +728,7 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 				return nil, err
 			}
 			events = append(events, event)
-			t := time.Unix(int64(ts), 0)
+			t := eventTime.In(window.location)
 			var label string
 			switch bucket {
 			case "hour":
@@ -689,7 +773,7 @@ func usageResponse(q map[string][]string) ([]byte, error) {
 		"skipped":      skipped,
 		"version":      version,
 		"configured":   true,
-		"timezone":     time.Now().Format("MST"),
+		"timezone":     window.timezone,
 	}
 	return json.Marshal(resp)
 }
@@ -725,21 +809,21 @@ func addInputCache(e dbEvent, input, output, cache, creation, reasoning int64) b
 		(total == input+output+cachedInput && total != input+output+reasoning)
 }
 
-func parseAnyTime(s string) (float64, error) {
+func parseAnyTime(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return 0, fmt.Errorf("empty time")
+		return time.Time{}, fmt.Errorf("empty time")
 	}
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return float64(t.UnixNano()) / 1e9, nil
+		return t, nil
 	}
 	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local); err == nil {
-		return float64(t.UnixNano()) / 1e9, nil
+		return t, nil
 	}
 	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
-		return float64(t.UnixNano()) / 1e9, nil
+		return t, nil
 	}
-	return 0, fmt.Errorf("unsupported time %q", s)
+	return time.Time{}, fmt.Errorf("unsupported time %q", s)
 }
 
 func collectedAt() interface{} {

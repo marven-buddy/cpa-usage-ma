@@ -18,6 +18,13 @@ export const money = (n, currency = "USD", fxRate = DEFAULT_FX_RATE, maximumFrac
 };
 export const dateKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+export const keyLabel = (event) => event.key_note || event.key_label || event.key || "未知客户端";
+export const keyDescription = (event) => [event.key_note && (event.key_label || event.key), event.key_kind === "legacy_source"
+  ? "客户端未知 · 历史来源"
+  : event.key_kind === "unknown" ? "未提供客户端 Key" : "客户端 Key"].filter(Boolean).join(" · ");
+export const matchesUsageRow = (row, query) =>
+  [row.name, row.model, row.key, row.key_label, row.key_note, row.key_kind ? keyDescription(row) : ""]
+    .filter(Boolean).join(" ").toLowerCase().includes(query.trim().toLowerCase());
 export function summarize(events) {
   return events.reduce(
     (s, e) => ({
@@ -42,7 +49,9 @@ export function groups(events, key) {
     m.get(e[key]).push(e);
   }
   return [...m]
-    .map(([name, evs]) => ({ name, ...summarize(evs) }))
+    .map(([name, evs]) => ({ name, ...summarize(evs), ...(key === "key" ? {
+      key: name, key_label: evs[0].key_label || evs[0].key, key_note: evs[0].key_note || "", key_kind: evs[0].key_kind,
+    } : {}) }))
     .sort((a, b) => b.input + b.output - (a.input + a.output));
 }
 export function trend(events, bucket) {

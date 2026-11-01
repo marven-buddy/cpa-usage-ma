@@ -69,7 +69,7 @@ func addVersion(t *testing.T, at float64, prices, overrides map[string]modelPric
 }
 
 func TestHistoricalPriceVersions(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "history.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "history.sqlite"))
 	if _, err := db.Exec("DELETE FROM price_versions"); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestHistoricalPriceVersions(t *testing.T) {
 
 func TestCustomPriceValidationAndPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "custom.sqlite")
-	openDB(path)
+	openTestDB(t, path)
 	for _, body := range []string{`{}`, `{"model":"test","price":{"input":-1,"output":2}}`, `{"model":"test","price":{"input":2}}`, `{"model":"test","price":{"input":"2","output":2}}`} {
 		if setCustomPrice([]byte(body)) == nil {
 			t.Fatalf("invalid price accepted: %s", body)
@@ -136,8 +136,8 @@ func TestCustomPriceValidationAndPersistence(t *testing.T) {
 		t.Fatal("custom zero rate was lost")
 	}
 	// Reopen the real SQLite file, rather than relying on an in-memory settings map.
-	openDB(filepath.Join(t.TempDir(), "other.sqlite"))
-	openDB(path)
+	openTestDB(t, filepath.Join(t.TempDir(), "other.sqlite"))
+	openTestDB(t, path)
 	data, err := pricingResponse()
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func (failedPriceTransport) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 func TestPriceUpdateFailureIsFriendly(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "friendly-error.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "friendly-error.sqlite"))
 	oldClient := priceHTTPClient
 	priceHTTPClient = &http.Client{Transport: failedPriceTransport{}}
 	t.Cleanup(func() { priceHTTPClient = oldClient })
@@ -217,7 +217,7 @@ func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestRefreshOfflineAndOverride(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "refresh.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "refresh.sqlite"))
 	if err := setCustomPrice([]byte(`{"model":"test","provider":"proxy","price":{"input":1,"output":2}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestRefreshOfflineAndOverride(t *testing.T) {
 }
 
 func TestCostAPIFromRawUsage(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "api.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "api.sqlite"))
 	if err := setCustomPrice([]byte(`{"model":"alias","provider":"claude","price":{"input":2,"output":8,"cache_read":0.2,"cache_write":2.5}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestCostAPIFromRawUsage(t *testing.T) {
 }
 
 func TestPricingManagementWrite(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "management.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "management.sqlite"))
 	for _, tc := range []struct {
 		method, body string
 		want         int

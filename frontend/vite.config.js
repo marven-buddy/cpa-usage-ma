@@ -8,8 +8,7 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8898",
-      "/v0": "http://127.0.0.1:8317",
+      "/v0": process.env.CPA_DEV_TARGET || "http://127.0.0.1:8317",
     },
   },
 });

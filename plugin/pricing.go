@@ -438,7 +438,7 @@ func refreshPrices() error {
 	}
 	message := ""
 	if err != nil {
-		log.Printf("usage-report: price update failed: %v", err)
+		log.Printf("cpa-usage-ma: price update failed: %v", err)
 		message = priceUpdateWarning
 	}
 	_, stateErr := db.Exec("UPDATE price_state SET checked_at=?, error=? WHERE id=1", float64(time.Now().Unix()), message)

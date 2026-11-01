@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -55,7 +55,7 @@ func TestTokenNormalization(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			openDB(filepath.Join(t.TempDir(), "event.sqlite"))
+			openTestDB(t, filepath.Join(t.TempDir(), "event.sqlite"))
 			payload, err := json.Marshal(map[string]any{"result": map[string]any{
 				"Provider": tc.provider, "ExecutorType": tc.executor, "Model": tc.name, "Source": "test-fixture",
 				"RequestedAt": "2026-09-10T11:30:00+08:00",
@@ -83,25 +83,15 @@ func TestTokenNormalization(t *testing.T) {
 			if stored.Provider != tc.provider || stored.ExecutorType != tc.executor || toI64(stored.Tokens["input_tokens"]) != tc.input {
 				t.Fatalf("raw counters or protocol metadata changed: %s", before)
 			}
-			var legacy map[string]any
-			if err := json.Unmarshal([]byte(before), &legacy); err != nil {
-				t.Fatal(err)
-			}
-			delete(legacy, "provider")
-			delete(legacy, "executor_type")
-			legacyJSON, err := json.Marshal(legacy)
-			if err != nil {
-				t.Fatal(err)
-			}
-			digest := sha1.Sum(legacyJSON)
+			digest := sha256.Sum256([]byte(before))
 			var dedup string
 			if err := db.QueryRow("SELECT dedup FROM usage_events").Scan(&dedup); err != nil {
 				t.Fatal(err)
 			}
-			if dedup != hex.EncodeToString(digest[:]) {
-				t.Fatal("protocol metadata changed historical dedup identity")
+			if dedup != "v2:"+hex.EncodeToString(digest[:]) {
+				t.Fatal("v2 dedup must include the complete stored identity and metadata")
 			}
-			status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/usage", "GET")
+			status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/usage", "GET")
 			if status != 200 {
 				t.Fatalf("HTTP %d: %s", status, body)
 			}

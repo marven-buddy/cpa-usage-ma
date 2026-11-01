@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarize, groups, trend, dateKey, money } from "./analytics.js";
+import { summarize, groups, trend, dateKey, keyDescription, keyLabel, matchesUsageRow, money } from "./analytics.js";
 const fixture = [
   {
     ts: new Date(2026, 0, 1, 12).getTime() / 1000,
@@ -60,4 +60,52 @@ test("unpriced trend buckets remain gaps and free buckets remain zero", () => {
   assert.equal(money(null), "未定价");
   assert.equal(money(0), "$0.00");
   assert.equal(money(0.0000001), "< $0.000001");
+});
+
+test("client grouping uses full IDs even when display labels collide, and keeps history separate", () => {
+  const events = [
+    { ...fixture[0], key: "client-abcdefghij111", key_label: "key-abcdefghij", key_kind: "client", cost: 1 },
+    { ...fixture[0], model: "another-model", key: "client-abcdefghij111", key_label: "key-abcdefghij", key_kind: "client", cost: 2 },
+    { ...fixture[0], key: "client-abcdefghij222", key_label: "key-abcdefghij", key_kind: "client", cost: 3 },
+    { ...fixture[0], key: "legacy-same-source", key_label: "历史来源 · key-abcdefghij", key_kind: "legacy_source", cost: 4 },
+    { ...fixture[0], key: "client:unknown", key_label: "未知客户端", key_kind: "unknown", cost: 5 },
+  ];
+  const grouped = groups(events, "key");
+  assert.equal(grouped.length, 4);
+  assert.equal(grouped.find((row) => row.name === events[0].key).n, 2);
+  assert.equal(grouped.reduce((sum, row) => sum + row.cost, 0), summarize(events).cost);
+  assert.equal(grouped.reduce((sum, row) => sum + row.input + row.output, 0), summarize(events).input + summarize(events).output);
+  assert.equal(groups(events, "model").find((row) => row.name === "a").n, 4);
+  const legacy = grouped.find((row) => row.key_kind === "legacy_source");
+  assert.equal(keyLabel(legacy), "历史来源 · key-abcdefghij");
+  assert.equal(keyDescription(legacy), "客户端未知 · 历史来源");
+  assert.equal(keyDescription(events[4]), "未提供客户端 Key");
+});
+
+test("usage searches match visible labels, full identities, and legacy/unknown descriptions", () => {
+  const row = { name: "client-full-id-12345", key_label: "key-short-id", key_kind: "client" };
+  assert.equal(matchesUsageRow(row, " SHORT-ID "), true);
+  assert.equal(matchesUsageRow(row, "full-id"), true);
+  assert.equal(matchesUsageRow(row, "客户端"), true);
+  assert.equal(matchesUsageRow({ key: "legacy-id", key_kind: "legacy_source" }, "历史来源"), true);
+  assert.equal(matchesUsageRow({ key_label: "未知客户端", key_kind: "unknown" }, "未知客户端"), true);
+  assert.equal(matchesUsageRow({ model: "my-model", key: "client-id" }, "my-model"), true);
+  assert.equal(matchesUsageRow(row, "missing-label"), false);
+});
+
+test("notes change labels and search without merging clients or losing their original labels", () => {
+  const events = [
+    { ...fixture[0], key: "client-first", key_label: "key-first", key_kind: "client", key_note: "办公 & <电脑>" },
+    { ...fixture[0], key: "client-second", key_label: "key-second", key_kind: "client", key_note: "办公 & <电脑>" },
+  ];
+  const rows = groups(events, "key");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].n, 1);
+  assert.equal(keyLabel(rows[0]), "办公 & <电脑>");
+  assert.equal(rows[0].key_label, "key-first");
+  assert.equal(keyDescription(rows[0]), "key-first · 客户端 Key");
+  assert.equal(matchesUsageRow(rows[0], "办公"), true);
+  assert.equal(matchesUsageRow(rows[0], "key-first"), true);
+  assert.equal(keyLabel({ ...rows[0], key_note: "" }), "key-first");
+  assert.equal(summarize(events).n, rows.reduce((total, row) => total + row.n, 0));
 });

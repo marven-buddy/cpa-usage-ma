@@ -2,15 +2,19 @@
   "schema_version": 1,
   "plugins": [
     {
-      "id": "usage-report",
-      "name": "CPA Usage Report",
-      "description": "Local-first token usage dashboard: real-time usage collection, model/key breakdown, trend chart. Bundles the cpa-usage shadcn/ui dashboard.",
-      "author": "andyWang1688",
-      "version": "0.4.0",
-      "repository": "https://github.com/andyWang1688/cpa-usage",
-      "homepage": "https://github.com/andyWang1688/cpa-usage",
+      "id": "cpa-usage-ma",
+      "name": "cpa-usage-ma",
+      "description": "Lightweight CLIProxyAPI v8 usage dashboard with anonymous client attribution, key notes and browser-timezone analytics.",
+      "author": "marven-buddy",
+      "version": "0.4.1",
+      "repository": "https://github.com/marven-buddy/cpa-usage-ma",
+      "homepage": "https://github.com/marven-buddy/cpa-usage-ma",
       "license": "MIT",
-      "tags": ["usage", "dashboard", "analytics"]
+      "tags": [
+        "usage",
+        "dashboard",
+        "analytics"
+      ]
     }
   ]
 }

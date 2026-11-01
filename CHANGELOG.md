@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+- Publish the fork as the independent cpa-usage-ma plugin: new plugin ID, routes, binary/archive names, default database path and browser storage namespace. No automatic migration of the original plugin.
+- Support CLIProxyAPI v8 Base64 configuration and schema 6 management JSON. Create missing database directories and retain the active database after a failed reconfiguration.
+- Read management credentials in v1/v2 formats and allow a manually entered management key, verified before saving to the current tab session.
+- Separate anonymous client identity from upstream account identity; preserve legacy rows without guessing client ownership. Add persistent editable key notes.
+- Use browser-timezone date boundaries and trend buckets, including daylight-saving transitions; embed timezone data in the plugin.
+- Prepare the fork plugin source, version checks, release notes and installable Linux amd64 packaging.
+- Known limits: incomplete usage-write error reporting, missing independent Gemini/Antigravity reasoning tokens, simplified YAML parsing and full-history queries. Linux host loading still requires acceptance testing.
+
 ## 0.4.0
 
 - Add estimated token costs to the dashboard, trends, and model/key/request details (#17). Show pricing coverage and distinguish unpriced requests from zero cost.

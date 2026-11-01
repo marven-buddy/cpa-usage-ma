@@ -12,6 +12,7 @@ import {
   KeyRound,
   Layers,
   Moon,
+  Pencil,
   RefreshCw,
   Search,
   Sun,
@@ -57,6 +58,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { PriceDialog } from "@/components/price-dialog";
 import { CurrencyControl } from "@/components/currency-control";
+import { AuthDialog } from "@/components/auth-dialog";
+import { KeyNoteDialog } from "@/components/key-note-dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -68,8 +71,10 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { compact, convertUSD, dateKey, fmt, groups, money, summarize, trend } from "./analytics";
+import { compact, convertUSD, dateKey, fmt, groups, keyDescription, keyLabel, matchesUsageRow, money, summarize, trend } from "./analytics";
 import { readCurrencySettings, saveCurrencySettings } from "./currency";
+import { AuthError, createManagementClient } from "./auth";
+import { usageQuery } from "./time-range";
 import "./index.css";
 
 const chartConfig = {
@@ -153,60 +158,25 @@ function Metric({ label, value, raw, format, detail, help, loading, className = 
     </Card>
   );
 }
-const API_BASE = "/v0/management/plugins/usage-report/api";
-const KEY_PROMPT =
-  "请返回 CPA 管理中心重新登录并勾选“记住密码”，然后刷新本页面。";
-
-function xorBytes(bytes, keyBytes) {
-  const output = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
-    output[i] = bytes[i] ^ keyBytes[i % keyBytes.length];
-  }
-  return output;
-}
-
-// Read the CPA management panel session from same-origin localStorage,
-// following the secure-storage format used across the CPA plugin ecosystem.
-function decodeCPAStorage(raw) {
-  if (!raw) return null;
-  const prefix = "enc::v1::";
-  let text = raw;
-  if (text.startsWith(prefix)) {
-    const binary = atob(text.slice(prefix.length));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const storageKey = `cli-proxy-api-webui::secure-storage|${location.host}|${navigator.userAgent}`;
-    text = new TextDecoder().decode(
-      xorBytes(bytes, new TextEncoder().encode(storageKey)),
-    );
-  }
-  return JSON.parse(text);
-}
-
-function readManagementKey() {
-  try {
-    const parsed = decodeCPAStorage(localStorage.getItem("cli-proxy-auth"));
-    const state = parsed && parsed.state ? parsed.state : parsed;
-    const value = state && state.managementKey;
-    return typeof value === "string" ? value.trim() : "";
-  } catch {
-    return "";
-  }
-}
-async function request(path, options = {}) {
-  const key = readManagementKey();
-  if (!key) throw Error(KEY_PROMPT);
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${key}`, ...(options.body ? { "Content-Type": "application/json" } : {}) },
-  });
-  if (response.status === 401 || response.status === 403) throw Error(KEY_PROMPT);
-  const data = await response.json();
-  if (!response.ok || data.error) throw Error(data.error || `服务返回 ${response.status}`);
-  return data;
-}
+// Accessing browser storage itself can fail when storage is disabled.
+const browserStorage = (name) => { try { return window[name]; } catch { return undefined; } };
+const authClient = createManagementClient({
+  localStorage: browserStorage("localStorage"),
+  sessionStorage: browserStorage("sessionStorage"),
+  host: location.host,
+  userAgent: navigator.userAgent,
+  fetch: (...args) => fetch(...args),
+  devKey: import.meta.env.DEV && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname)
+    ? import.meta.env.VITE_CPA_DEV_KEY || "" : "",
+});
+const credentialSource = () => { try { return authClient.credential().source; } catch { return ""; } };
 
 function App() {
+  const [noteTarget, setNoteTarget] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authIssue, setAuthIssue] = useState("");
+  const [authSource, setAuthSource] = useState(credentialSource);
+  const [authNotice, setAuthNotice] = useState("");
   const [range, setRange] = useState(initialRange),
     [draft, setDraft] = useState(initialRange),
     [calendarOpen, setCalendarOpen] = useState(false),
@@ -223,21 +193,33 @@ function App() {
     [page, setPage] = useState(0),
     [sort, setSort] = useState("tokens"),
     [dark, setDark] = useState(
-      () => localStorage.getItem("cpa-usage-theme") === "dark",
+      () => { try { return browserStorage("localStorage")?.getItem("cpa-usage-ma-theme") === "dark"; } catch { return false; } },
     );
   const generation = useRef(0);
+  const authRevision = useRef(0);
   const { currency, fxRate } = currencySettings;
   const displayMoney = (n) => money(n, currency, fxRate);
   useEffect(() => saveCurrencySettings(currencySettings), [currencySettings]);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("cpa-usage-theme", dark ? "dark" : "light");
+    try { browserStorage("localStorage")?.setItem("cpa-usage-ma-theme", dark ? "dark" : "light"); } catch { /* Theme remains page-local. */ }
   }, [dark]);
+  async function request(path, options = {}) {
+    const revision = authRevision.current;
+    try {
+      const result = await authClient.request(path, options);
+      if (revision === authRevision.current) { setAuthSource(credentialSource()); setAuthIssue(""); }
+      return result;
+    } catch (e) {
+      if (revision === authRevision.current && e instanceof AuthError) { setAuthIssue(e.message); setAuthOpen(true); }
+      throw e;
+    }
+  }
   async function load() {
     const id = ++generation.current;
     setBusy(true);
     try {
-      const d = await request(`/usage?start=${dateKey(range.from)}&end=${dateKey(range.to)}&bucket=${bucket}`);
+      const d = await request(`/usage?${usageQuery(range, bucket)}`);
       if (id === generation.current) {
         setData(d);
         setError("");
@@ -268,6 +250,7 @@ function App() {
   );
   const stats = useMemo(() => summarize(events), [events]),
     buckets = useMemo(() => trend(events, bucket), [events, bucket]);
+  const legacyRequests = events.filter((event) => event.key_kind === "legacy_source").length;
   const costBuckets = useMemo(() => buckets.map((b) => ({
     ...b, cost: convertUSD(b.cost, currency, fxRate),
   })), [buckets, currency, fxRate]);
@@ -284,11 +267,7 @@ function App() {
       tab === "requests"
         ? [...events].reverse()
         : groups(events, tab === "model" ? "model" : "key");
-    result = result.filter((r) =>
-      (r.name || r.model + " " + r.key)
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    );
+    result = result.filter((r) => matchesUsageRow(r, query));
     if (sort === "cost")
       result.sort((a, b) => {
         const aCost = tab === "requests" ? a.cost : a.priced ? a.cost : null;
@@ -332,6 +311,23 @@ function App() {
           : 0;
   return (
     <TooltipProvider>
+      <KeyNoteDialog row={noteTarget} onClose={() => setNoteTarget(null)} onSave={async (key, note) => {
+        await request("/key-note", { method: "POST", body: JSON.stringify({ key, note }) });
+        setData((current) => current ? { ...current, events: current.events.map((event) => event.key === key ? { ...event, key_note: note } : event) } : current);
+      }} />
+      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} issue={authIssue} source={authSource}
+        onConnect={async (key) => {
+          const { persisted } = await authClient.connect(key);
+          authRevision.current++;
+          setAuthSource(credentialSource()); setAuthIssue(""); setAuthOpen(false);
+          setAuthNotice(persisted ? "" : "浏览器未允许会话存储，管理密钥仅在当前页面有效，刷新后需重新输入。");
+          await load();
+        }}
+        onClear={() => {
+          authClient.clearManualKey(); authRevision.current++;
+          setAuthSource(credentialSource()); setAuthIssue(""); setAuthNotice("");
+          load();
+        }} />
       <div className="min-h-dvh">
         <header className="border-b bg-card">
           <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-8">
@@ -342,7 +338,7 @@ function App() {
               <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Activity className="size-4" />
               </span>
-              CPA Usage
+              cpa-usage-ma
               <Badge
                 variant="outline"
                 className="hidden sm:inline-flex font-normal text-muted-foreground"
@@ -351,6 +347,9 @@ function App() {
               </Badge>
             </a>
             <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAuthOpen(true)}>
+                <KeyRound className="size-4" /><span className="hidden sm:inline">管理密钥</span><span className="sr-only sm:hidden">管理密钥</span>
+              </Button>
               <PriceDialog request={request} onSaved={load} currency={currency} fxRate={fxRate} />
               <Badge
                 variant="outline"
@@ -473,6 +472,7 @@ function App() {
                 : "每 60 秒自动刷新"}
             </span>
           </div>
+          {authNotice && <p role="status" className="text-sm text-muted-foreground">{authNotice}</p>}
           {error && (
             <Alert variant="destructive">
               <WifiOff />
@@ -661,14 +661,14 @@ function App() {
                 <div>
                   <CardTitle className="text-base">用量明细</CardTitle>
                   <CardDescription className="mt-1.5">
-                    从模型到每次请求，逐层查看
+                    {tab === "key" ? "按客户端 Key 汇总，升级前历史来源单独列出" : "从模型到每次请求，逐层查看"}
                   </CardDescription>
                 </div>
                 <div className="relative w-full sm:w-60">
                   <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
                   <Input
                     className="pl-9"
-                    placeholder="搜索模型或 Key"
+                    placeholder="搜索模型、Key 或备注"
                     aria-label="搜索明细"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -731,14 +731,17 @@ function App() {
                     </SelectContent>
                   </Select>
               </div>
+              {tab === "key" && legacyRequests > 0 && <p className="px-6 pb-4 text-xs leading-relaxed text-muted-foreground">
+                当前范围内有 {fmt(legacyRequests)} 条历史记录无法确定客户端，仅按历史来源列出，其用量仍计入总览。
+              </p>}
               <Separator />
               <Table>
                 <TableHeader>
                   <TableRow>
                     {(tab === "requests"
-                      ? ["时间 / 模型", "Key", "状态", "输入", "缓存", "输出", "预估费用"]
+                      ? ["时间 / 模型", "客户端 Key", "状态", "输入", "缓存", "输出", "预估费用"]
                       : [
-                          "模型 / Key",
+                          tab === "key" ? "客户端 Key / 历史来源" : "模型",
                           "请求",
                           "成功率",
                           "输入",
@@ -774,8 +777,9 @@ function App() {
                               {r.model}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right font-mono text-xs">
-                            {r.key}
+                          <TableCell className="max-w-64 text-right text-xs" title={`${keyLabel(r)}\n${r.key}`}>
+                            <div className="font-mono">{keyLabel(r)}</div>
+                            <p className="mt-1 text-[10px] text-muted-foreground">{keyDescription(r)}</p>
                           </TableCell>
                           <TableCell className="text-right">
                             <Badge
@@ -789,9 +793,13 @@ function App() {
                         <>
                           <TableCell
                             className="max-w-64 truncate pl-6 font-medium"
-                            title={r.name}
+                            title={tab === "key" ? `${keyLabel(r)}\n${r.name}` : r.name}
                           >
-                            {r.name}
+                            <div className="flex items-center gap-2">
+                              <span className="truncate">{tab === "key" ? keyLabel(r) : r.name}</span>
+                              {tab === "key" && <Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label={`编辑备注 ${r.key_label || r.name}`} onClick={() => setNoteTarget(r)}><Pencil className="size-3" /></Button>}
+                            </div>
+                            {tab === "key" && <p className="mt-1 text-[10px] font-normal text-muted-foreground">{keyDescription(r)}</p>}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {fmt(r.n)}
@@ -844,7 +852,7 @@ function App() {
             </div>
             <Separator />
             <div className="flex items-center justify-between px-6 py-3 text-xs text-muted-foreground">
-              <span>{fmt(rows.length)} 条记录 · Key 已匿名化</span>
+              <span>{fmt(rows.length)} 条记录 · 客户端 Key 已匿名化</span>
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
@@ -875,7 +883,7 @@ function App() {
           <footer className="flex flex-wrap items-center justify-between gap-2 pb-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <Database className="size-3" />
-              本地 SQLite · {data?.timezone || "本机时区"} · v
+              本地 SQLite · 统计时区：{data?.timezone || "浏览器时区"} · v
               {data?.version || "0.1.1"}
             </span>
             <span>

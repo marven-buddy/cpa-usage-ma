@@ -2,10 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func openTestDB(t *testing.T, path string) {
+	t.Helper()
+	if err := openDB(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cliproxyPluginShutdown)
+}
 
 func TestRegister(t *testing.T) {
 	raw, err := handleMethod("plugin.register", nil)
@@ -15,6 +24,22 @@ func TestRegister(t *testing.T) {
 	var e envelope
 	if err := json.Unmarshal(raw, &e); err != nil || !e.OK {
 		t.Fatalf("register: %s %v", raw, err)
+	}
+	var registration struct {
+		SchemaVersion int `json:"schema_version"`
+		Metadata      struct {
+			Name             string
+			GitHubRepository string
+		}
+	}
+	if err := json.Unmarshal(e.Result, &registration); err != nil || registration.SchemaVersion != 6 {
+		t.Fatal("management JSON must preserve raw note strings using schema 6")
+	}
+	if registration.Metadata.Name != "cpa-usage-ma" || registration.Metadata.GitHubRepository != "https://github.com/marven-buddy/cpa-usage-ma" {
+		t.Fatalf("independent plugin metadata: %+v", registration.Metadata)
+	}
+	if filepath.Base(filepath.Dir(defaultDBPath())) != "cpa-usage-ma" || filepath.Base(defaultDBPath()) != "usage.sqlite" {
+		t.Fatalf("default database must be isolated from the original plugin: %s", defaultDBPath())
 	}
 }
 
@@ -57,13 +82,13 @@ func callMgmt(t *testing.T, path, method string) (int, string, []byte) {
 }
 
 func TestManagementReport(t *testing.T) {
-	status, ct, body := callMgmt(t, "/v0/resource/plugins/usage-report/report", "GET")
+	status, ct, body := callMgmt(t, "/v0/resource/plugins/cpa-usage-ma/report", "GET")
 	if status != 200 || len(body) < 300 {
 		t.Fatalf("page: %d %s %d bytes", status, ct, len(body))
 	}
 	t.Logf("page ok: %d bytes, %s", len(body), ct)
 
-	status, ct, js := callMgmt(t, "/v0/resource/plugins/usage-report/assets/index-WH-FNvxu.js", "GET")
+	status, ct, js := callMgmt(t, "/v0/resource/plugins/cpa-usage-ma/assets/index-Cp--UGfL.js", "GET")
 	if status != 200 || len(js) < 100000 {
 		t.Fatalf("js: %d %s %d bytes", status, ct, len(js))
 	}
@@ -71,12 +96,12 @@ func TestManagementReport(t *testing.T) {
 }
 
 func TestManagementAPI(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "test.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "test.sqlite"))
 	seed := []byte(`{"result":{"Provider":"codex","Model":"gpt-ci-test","Source":"sk-ci","RequestedAt":"2026-09-10T11:30:00+08:00","Detail":{"InputTokens":100,"OutputTokens":20,"CacheReadTokens":80,"TotalTokens":120},"Failed":false}}`)
 	if _, err := handleMethod("usage.handle", seed); err != nil {
 		t.Fatal(err)
 	}
-	status, _, body := callMgmt(t, "/v0/management/plugins/usage-report/api/usage", "GET")
+	status, _, body := callMgmt(t, "/v0/management/plugins/cpa-usage-ma/api/usage", "GET")
 	if status != 200 {
 		t.Fatalf("usage api: %d %s", status, body)
 	}
@@ -97,7 +122,7 @@ func TestManagementAPI(t *testing.T) {
 }
 
 func TestUsageHandle(t *testing.T) {
-	openDB(filepath.Join(t.TempDir(), "test.sqlite"))
+	openTestDB(t, filepath.Join(t.TempDir(), "test.sqlite"))
 	req := []byte(`{"result":{"Provider":"codex","Model":"gpt-6-astra","Source":"sk-test","RequestedAt":"2026-09-18T11:30:00+08:00","Latency":1500000000,"TTFT":250000000,"Detail":{"InputTokens":100,"OutputTokens":20,"ReasoningTokens":5,"CachedTokens":80,"CacheReadTokens":80,"TotalTokens":120},"Failed":false}}`)
 	raw, err := handleMethod("usage.handle", req)
 	if err != nil {
@@ -119,15 +144,56 @@ func TestUsageHandle(t *testing.T) {
 
 func TestApplyConfig(t *testing.T) {
 	tmp := t.TempDir()
-	direct := []byte(`{"config_yaml":"enabled: true\ndb_path: \"` + tmp + `/direct.sqlite\"\n"}`)
-	applyConfig(direct)
-	if lastOpened != tmp+"/direct.sqlite" {
+	t.Cleanup(cliproxyPluginShutdown)
+	directPath := filepath.Join(tmp, "direct.sqlite")
+	direct, _ := json.Marshal(map[string]any{"config_yaml": "enabled: true\ndb_path: " + directPath + "\n"})
+	if err := applyConfig(direct); err != nil {
+		t.Fatal(err)
+	}
+	if lastOpened != directPath {
 		t.Fatalf("direct shape: got %q", lastOpened)
 	}
-	wrapped := []byte(`{"result":{"config_yaml":"db_path: ` + tmp + `/wrapped.sqlite"}}`)
-	applyConfig(wrapped)
-	if lastOpened != tmp+"/wrapped.sqlite" {
+	wrappedPath := filepath.Join(tmp, "wrapped.sqlite")
+	wrapped, _ := json.Marshal(map[string]any{"result": map[string]any{"config_yaml": "db_path: " + wrappedPath}})
+	if err := applyConfig(wrapped); err != nil {
+		t.Fatal(err)
+	}
+	if lastOpened != wrappedPath {
 		t.Fatalf("wrapped shape: got %q", lastOpened)
+	}
+}
+
+func TestV8ConfigAndFailedReconfigure(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(cliproxyPluginShutdown)
+	path := filepath.Join(dir, "new", "nested", "usage.sqlite")
+	// Match the v8 host's []byte JSON encoding, including Base64 config_yaml.
+	raw, err := json.Marshal(struct {
+		ConfigYAML    []byte `json:"config_yaml"`
+		SchemaVersion int    `json:"schema_version"`
+	}{[]byte("enabled: true\ndb_path: " + path + "\n"), 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handleMethod("plugin.register", raw); err != nil {
+		t.Fatal(err)
+	}
+	if lastOpened != path {
+		t.Fatalf("v8 configuration ignored: got %q, want %q", lastOpened, path)
+	}
+	blocker := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("occupied"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	badConfig, _ := json.Marshal(map[string]any{"config_yaml": []byte("db_path: " + filepath.Join(blocker, "usage.sqlite"))})
+	if _, err := handleMethod("plugin.reconfigure", badConfig); err == nil {
+		t.Fatal("invalid database path should fail reconfiguration")
+	}
+	if lastOpened != path {
+		t.Fatal("failed reconfiguration replaced the working database")
+	}
+	if err := db.Ping(); err != nil {
+		t.Fatalf("working database was closed: %v", err)
 	}
 }
 
@@ -152,14 +218,14 @@ func TestManagementRegisterRoutes(t *testing.T) {
 	if err := json.Unmarshal(e.Result, &reg); err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.Routes) != 6 {
-		t.Fatalf("expect 6 authenticated routes, got %d", len(reg.Routes))
+	if len(reg.Routes) != 7 {
+		t.Fatalf("expect 7 authenticated routes, got %d", len(reg.Routes))
 	}
 	for _, r := range reg.Routes {
 		if r.Method != "GET" && r.Method != "POST" {
 			t.Fatalf("route %s missing explicit method", r.Path)
 		}
-		if !strings.HasPrefix(r.Path, "/plugins/usage-report/api/") {
+		if !strings.HasPrefix(r.Path, "/plugins/cpa-usage-ma/api/") {
 			t.Fatalf("route outside plugin namespace: %s", r.Path)
 		}
 	}

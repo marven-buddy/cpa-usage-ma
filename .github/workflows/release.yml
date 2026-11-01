@@ -1,11 +1,41 @@
 name: Release
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 permissions:
   contents: read
 jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate release source
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+      - name: Test and vet plugin
+        working-directory: plugin
+        run: go test ./... && go vet ./...
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Test and build dashboard
+        working-directory: frontend
+        run: npm ci && npm test && npm run build
+      - name: Verify version and embedded resources
+        run: node scripts/verify-release.mjs
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -19,7 +49,7 @@ jobs:
             goarch: amd64
             ext: dylib
             cc: "clang -arch x86_64"
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             goos: linux
             goarch: amd64
             ext: so
@@ -58,15 +88,15 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p /tmp/plugin-release
-          go build -ldflags "-X main.version=${VERSION}" -buildmode=c-shared -o "/tmp/plugin-release/usage-report-v${VERSION}.${{ matrix.ext }}" .
+          go build -ldflags "-X main.version=${VERSION}" -buildmode=c-shared -o "/tmp/plugin-release/cpa-usage-ma-v${VERSION}.${{ matrix.ext }}" .
           cp ../LICENSE ../THIRD_PARTY_NOTICES.md /tmp/plugin-release/
           cd /tmp/plugin-release
-          zip "usage-report_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "usage-report-v${VERSION}.${{ matrix.ext }}" LICENSE THIRD_PARTY_NOTICES.md
+          zip "cpa-usage-ma_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "cpa-usage-ma-v${VERSION}.${{ matrix.ext }}" LICENSE THIRD_PARTY_NOTICES.md
           ls -la
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: /tmp/plugin-release/usage-report_*.zip
+          path: /tmp/plugin-release/cpa-usage-ma_*.zip
 
   publish:
     needs: build
@@ -88,4 +118,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" /tmp/plugin-release/*.zip /tmp/plugin-release/checksums.txt --verify-tag --title "CPA Usage $GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" /tmp/plugin-release/*.zip /tmp/plugin-release/checksums.txt --verify-tag --title "cpa-usage-ma $GITHUB_REF_NAME" --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
